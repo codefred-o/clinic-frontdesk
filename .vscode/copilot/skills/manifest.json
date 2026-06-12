@@ -1,0 +1,23 @@
+{
+	"version": 2,
+	"repoProfile": {
+		"projectTypes": [
+			"documentation"
+		],
+		"summary": "Project types: documentation\nLanguages: markdown\nTop extensions: md, json",
+		"primaryLanguages": [
+			"markdown"
+		],
+		"indexedAt": "2026-06-12T01:54:28.578Z"
+	},
+	"skills": [
+		{
+			"slug": "aidotnet/moyucode/json-validator",
+			"folderName": "json-validator",
+			"source": "startup",
+			"searchQuery": "json schema validation documentation",
+			"relevanceScore": 7,
+			"fetchedAt": "2026-06-12T01:55:02.975Z"
+		}
+	]
+}
