@@ -27,7 +27,7 @@ def test_prompt_contains_safety_and_handoff_rules() -> None:
 
 
 def test_prompt_contains_booking_confirmation_markers() -> None:
-    assert "✅ Appointment confirmed" in SYSTEM_PROMPT
+    assert "✅ *Appointment confirmed*" in SYSTEM_PROMPT
     assert "👤 [Name]" in SYSTEM_PROMPT
     assert "🦷 [Service]" in SYSTEM_PROMPT
     assert "📅 [Day, Date — Time]" in SYSTEM_PROMPT

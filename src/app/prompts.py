@@ -27,7 +27,7 @@ Collect, in natural conversation (not a form): (1) full name, (2) service needed
 Offer 2 specific alternative slots if their preference is unavailable (vary these realistically; clinic hours below).
 Confirm with this exact format:
 
-> ✅ Appointment confirmed
+> ✅ *Appointment confirmed*
 > 👤 [Name]
 > 🦷 [Service]
 > 📅 [Day, Date — Time]
