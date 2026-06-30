@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from tests.conftest import VERIFY_TOKEN, FakeLLM, FakeWhatsApp
+from typing import Any
+
+import pytest
+
+VERIFY_TOKEN = "test-verify-token"
 
 
 def _inbound_payload(from_number: str, text: str) -> dict:
@@ -63,7 +67,7 @@ def test_verify_handshake_wrong_token(client):
     assert resp.status_code == 403
 
 
-def test_inbound_text_triggers_reply(client, fake_llm: FakeLLM, fake_whatsapp: FakeWhatsApp):
+def test_inbound_text_triggers_reply(client, fake_llm: Any, fake_whatsapp: Any):
     resp = client.post("/webhook", json=_inbound_payload("2348012345678", "Hello"))
     assert resp.status_code == 200
 
@@ -76,7 +80,7 @@ def test_inbound_text_triggers_reply(client, fake_llm: FakeLLM, fake_whatsapp: F
     assert fake_whatsapp.sent == [("2348012345678", fake_llm.reply_text)]
 
 
-def test_non_text_event_is_ignored(client, fake_llm: FakeLLM, fake_whatsapp: FakeWhatsApp):
+def test_non_text_event_is_ignored(client, fake_llm: Any, fake_whatsapp: Any):
     payload = {
         "object": "whatsapp_business_account",
         "entry": [
@@ -100,7 +104,7 @@ def test_non_text_event_is_ignored(client, fake_llm: FakeLLM, fake_whatsapp: Fak
     assert fake_whatsapp.sent == []
 
 
-def test_conversation_history_persists_across_messages(client, fake_llm: FakeLLM):
+def test_conversation_history_persists_across_messages(client, fake_llm: Any):
     client.post("/webhook", json=_inbound_payload("2348000000000", "First"))
     client.post("/webhook", json=_inbound_payload("2348000000000", "Second"))
 
@@ -109,3 +113,74 @@ def test_conversation_history_persists_across_messages(client, fake_llm: FakeLLM
     roles = [m["role"] for m in second_history]
     assert roles == ["user", "assistant", "user"]
     assert second_history[-1]["content"] == "Second"
+
+
+def test_malformed_payload_is_ignored(client, fake_llm: Any, fake_whatsapp: Any):
+    resp = client.post("/webhook", json={"entry": [{"changes": [{}]}]})
+
+    assert resp.status_code == 200
+    assert fake_llm.calls == []
+    assert fake_whatsapp.sent == []
+
+
+def test_webhook_processes_first_text_across_entries(
+    client,
+    fake_llm: Any,
+    fake_whatsapp: Any,
+):
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {"from": "2348000000000", "id": "wamid.image", "type": "image"}
+                            ]
+                        }
+                    }
+                ]
+            },
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "2348012345678",
+                                    "id": "wamid.text",
+                                    "type": "text",
+                                    "text": {"body": "Book cleaning"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        ],
+    }
+
+    resp = client.post("/webhook", json=payload)
+
+    assert resp.status_code == 200
+    assert fake_llm.calls[0][-1] == {"role": "user", "content": "Book cleaning"}
+    assert fake_whatsapp.sent == [("2348012345678", fake_llm.reply_text)]
+
+
+def test_downstream_whatsapp_failure_returns_200(
+    client,
+    fake_llm: Any,
+    fake_whatsapp: Any,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fail_send_text(to: str, text: str) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(fake_whatsapp, "send_text", fail_send_text)
+
+    resp = client.post("/webhook", json=_inbound_payload("2348012345678", "Hello"))
+
+    assert resp.status_code == 200
+    assert fake_llm.calls[0][-1] == {"role": "user", "content": "Hello"}
+    assert fake_whatsapp.sent == []

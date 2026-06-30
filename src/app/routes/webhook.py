@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import PlainTextResponse
+from pydantic import ValidationError
 
 from app.models.whatsapp import WebhookPayload
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -30,7 +34,12 @@ async def receive_webhook(request: Request) -> Response:
 
     Always returns 200 so Meta does not retry; non-text events are ignored.
     """
-    payload = WebhookPayload.model_validate(await request.json())
+    try:
+        payload = WebhookPayload.model_validate(await request.json())
+    except ValidationError:
+        logger.info("Ignoring malformed WhatsApp webhook payload", exc_info=True)
+        return Response(status_code=200)
+
     message = payload.first_text_message()
     if message is None:
         return Response(status_code=200)
@@ -38,9 +47,12 @@ async def receive_webhook(request: Request) -> Response:
     state = request.app.state
     phone = message.from_number
 
-    state.conversations.add_user(phone, message.text)
-    reply = await state.llm.reply(state.conversations.get(phone))
-    state.conversations.add_assistant(phone, reply)
-    await state.whatsapp.send_text(phone, reply)
+    try:
+        state.conversations.add_user(phone, message.text)
+        reply = await state.llm.reply(state.conversations.get(phone))
+        state.conversations.add_assistant(phone, reply)
+        await state.whatsapp.send_text(phone, reply)
+    except Exception:
+        logger.exception("Failed to process WhatsApp webhook message")
 
     return Response(status_code=200)
