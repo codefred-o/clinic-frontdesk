@@ -42,8 +42,10 @@ One deployment serves many clinics. Rationale: Meta delivers all phone numbers u
 Bookings stop being theater. The LLM gets tools instead of only prose:
 
 - Tools: `book_appointment`, `reschedule_appointment`, `cancel_appointment` — structured fields: patient name, service, day/date/time, new-or-returning, phone (from sender).
-- On `book_appointment`: insert a row in SQLite (`bookings` table: id, clinic_id, patient phone, name, service, slot, status, created_at), send the confirmation card to the patient, and **forward the same card to the clinic's staff number** ("front desk phone buzzes" is the demo's closing moment).
+- On `book_appointment`: insert a row in SQLite (`bookings` table: id, clinic_id, patient phone, name, service, slot, status, created_at), send the confirmation card to the patient, and **notify the clinic's staff number** ("front desk phone buzzes" is the demo's closing moment).
 - Reschedule/cancel update the row's slot/status and notify both parties.
+- **Staff notifications must be approved template messages, not free-form text.** WhatsApp permits free-form sends only within 24h of the recipient's last inbound message; the staff number never messages the bot, so free-form sends to it would be rejected. Templates (e.g. `new_booking`, `booking_changed`) are approved **once per WABA** and cover every clinic under it — one-time setup, billed per send.
+- `LLMClient.reply()` (`src/app/services/llm.py:19`, today a single-shot completion) becomes a tool-execution loop: call → execute tool → feed result back → final patient-facing message.
 - SQLite lives on the persistent volume; every query is `clinic_id`-scoped.
 - The confirmation card's "You'll receive a reminder a day before" line is **removed/reworded** — v1 sends no automated reminders; staff remind manually from the notification.
 - Extraction-reliability mitigation: the card is always echoed back to the patient, so a wrong field is visible and correctable in-chat ("that should be Saturday, not Friday").
@@ -56,8 +58,8 @@ A service is responsible for someone's front desk. Silent failure is the worst o
 
 1. **No silent failures:** on any processing exception (`src/app/routes/webhook.py:55` currently swallows and goes mute), the patient receives the fallback "I'll connect you with our front desk team — they'll reply here shortly," and the error is logged.
 2. **Non-text messages** (voice notes, images — very common on Nigerian WhatsApp) get a polite "I can only read text messages for now 🙂 — please type your question" instead of being dropped.
-3. **Minimal human handoff:** a `handoff` tool call → staff number notified with the conversation context → bot replies paused for that `(clinic_id, phone)` for a configurable window (default 4h). Makes the prompt's existing "then stop responding" promise real.
-4. **Webhook authenticity:** verify `X-Hub-Signature-256` (app secret HMAC) on POST /webhook — the URL is public and there is a paid LLM behind it.
+3. **Minimal human handoff:** a `handoff` tool call → staff number notified (via approved template, per F2's window rule) with the conversation context → bot replies paused for that `(clinic_id, phone)` for a configurable window (default 4h). Makes the prompt's existing "then stop responding" promise real. Uses M2's tool-calling loop.
+4. **Webhook authenticity:** verify `X-Hub-Signature-256` (HMAC with the Meta app secret — new `whatsapp_app_secret` setting in `src/app/config.py`) on POST /webhook — the URL is public and there is a paid LLM behind it.
 5. **Throttle:** simple per-sender rate limit (e.g. max N messages/minute) to cap abuse cost.
 6. **Demo profile hygiene:** replace the `0803 XXX XXXX` placeholder with a plausible number — it currently appears verbatim in the emergency-escalation message.
 
@@ -67,7 +69,7 @@ A service is responsible for someone's front desk. Silent failure is the worst o
 
 - Always-on deploy to a cheap PaaS (Railway / Render / Fly) with a stable HTTPS URL and a persistent volume (SQLite + clinic configs).
 - `/health` (already exists in `src/app/main.py`) wired as the platform health check.
-- Structured logs; processing errors additionally alert **the operator** (WhatsApp message to the operator's number or email) — clinics' uptime is now our liability.
+- Structured logs; processing errors additionally alert **the operator** — via email or an approved WhatsApp template (free-form sends to the operator's number hit the same 24h-window rule as staff notifications) — clinics' uptime is now our liability.
 - Single process/worker documented as a v1 constraint (in-memory conversation state + SQLite); multi-worker is the v2 trigger, not a v1 bug.
 
 *Acceptance:* deployed URL passes Meta webhook verification; a real WhatsApp message round-trips in production; kill-and-restart keeps bookings and clinic configs.
@@ -95,13 +97,13 @@ Each is a v2 candidate gated on: ≥2 clinics retained and paying.
 
 ## 5. Service & onboarding notes
 
-- **Concierge onboarding runbook** (to be written during M4): provision number on operator's WABA → Meta display-name approval → write clinic YAML → test conversation → go live. Expect days of Meta lag per clinic; set owner expectations in the close.
+- **Concierge onboarding runbook** (to be written during M4): provision number on operator's WABA → Meta display-name approval → write clinic YAML → test conversation → go live. Notification templates (`new_booking`, `booking_changed`, `handoff_alert`, operator alert) are submitted for approval **once**, on the operator's WABA, before the first clinic — they cover all clinics under it. Expect days of Meta lag per clinic; set owner expectations in the close.
 - **WABA ownership:** default = operator's WABA (fast, we control it). A clinic may bring its own Meta business later — that's the dedicated-instance path F1's degenerate case preserves. Open decision, revisit at clinic #3.
 - **Data protection (NDPR posture):** minimal data by design — name, phone, service, 2–3-word reason; the prompt's existing privacy rule (no medical history, no test results) stays a hard rule; all rows `clinic_id`-scoped. Formal review before any clinic with its own compliance requirements.
 
 ## 6. Success metrics
 
-- **Reliability:** zero silent failures — 100% of inbound text messages get *some* reply (answer, fallback, or handoff notice); demo number answers 24/7.
+- **Reliability:** zero silent failures — every inbound text message gets *some* reply (answer, fallback, handoff notice, or one throttle notice), except follow-ups during an active handoff pause or throttle window, which are deliberately suppressed; demo number answers 24/7.
 - **Speed:** booking round-trip (patient confirmation + staff notification) < 15s.
 - **Outreach (user to set targets):** N cold messages sent → ≥ X demo conversations started → ≥ 1 clinic in concierge onboarding. Suggested starting targets: N = 30, X = 5.
 
@@ -111,7 +113,7 @@ Each is a v2 candidate gated on: ≥2 clinics retained and paying.
 |---|---|---|---|
 | M1 | Multi-tenant foundation | F1 (registry, prompt template, routing, keyed conversations) | — |
 | M2 | Real bookings | F2 (tools, SQLite, staff notification) | M1 |
-| M3 | Robustness & safety | F3 (fallback, non-text, handoff, signature, throttle) | M1 |
+| M3 | Robustness & safety | F3 (fallback, non-text, handoff, signature, throttle) | M1; M2 for the handoff tool |
 | M4 | Deploy + outreach kit | F4, F5 (PaaS, live demo clinic, video, templates, runbook) | M2, M3 |
 
 Every milestone keeps `pytest` and `ruff check .` green and updates the existing suite (current tests assume single-tenant shapes and will change in M1/M2). Each milestone gets its own implementation plan before coding.
@@ -125,3 +127,4 @@ Every milestone keeps `pytest` and `ruff check .` green and updates the existing
 | Single-process constraint (in-memory conversations, SQLite) | Caps scale | Fine at v1 volume; documented as the v2 trigger |
 | One bad deploy breaks *all* clinics' front desks | Churn | Staged deploy (demo clinic first), operator error alerts, `/health` checks |
 | Prompt drift breaks clinic facts | Wrong prices quoted | Existing prompt-integrity tests generalized to per-clinic profile rendering in M1 |
+| Template approval delayed or rejected by Meta | Staff notifications blocked — bookings persist but nobody is told | Submit templates at the very start of M2; fallback: operator relays bookings manually from SQLite until approval lands |
