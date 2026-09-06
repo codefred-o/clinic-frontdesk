@@ -242,3 +242,16 @@ def test_message_to_second_clinic_number_is_processed(client, fake_llm: Any, fak
     assert resp.status_code == 200
     assert len(fake_llm.calls) == 1
     assert len(fake_whatsapp.sent) == 1
+
+
+def test_conversations_are_isolated_per_clinic(client, fake_llm: Any):
+    client.post("/webhook", json=_inbound_payload("2348000000000", "Hello Sunrise"))
+    client.post(
+        "/webhook",
+        json=_inbound_payload(
+            "2348000000000", "Hello Greenfield", phone_number_id=GREENFIELD_PHONE_NUMBER_ID
+        ),
+    )
+
+    # Same patient phone, different clinic: the second history starts fresh.
+    assert [m["content"] for m in fake_llm.calls[1]] == ["Hello Greenfield"]
