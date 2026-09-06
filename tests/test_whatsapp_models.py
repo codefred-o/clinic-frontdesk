@@ -97,3 +97,69 @@ def test_first_text_message_returns_none_when_messages_missing() -> None:
     payload = WebhookPayload.model_validate({"entry": [{"changes": [{"value": {}}]}]})
 
     assert payload.first_text_message() is None
+
+
+def test_first_text_message_carries_phone_number_id_from_metadata() -> None:
+    payload = WebhookPayload.model_validate(
+        {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messaging_product": "whatsapp",
+                                "metadata": {
+                                    "display_phone_number": "2349000000000",
+                                    "phone_number_id": "123456789012345",
+                                },
+                                "messages": [
+                                    {
+                                        "from": "2348012345678",
+                                        "id": "wamid.123",
+                                        "type": "text",
+                                        "text": {"body": "Hello"},
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ],
+        }
+    )
+
+    message = payload.first_text_message()
+
+    assert message is not None
+    assert message.phone_number_id == "123456789012345"
+
+
+def test_first_text_message_phone_number_id_is_none_without_metadata() -> None:
+    payload = WebhookPayload.model_validate(
+        {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "from": "2348012345678",
+                                        "id": "wamid.123",
+                                        "type": "text",
+                                        "text": {"body": "Hello"},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+
+    message = payload.first_text_message()
+
+    assert message is not None
+    assert message.phone_number_id is None

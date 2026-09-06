@@ -9,6 +9,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import ValidationError
 
 from app.models.whatsapp import WebhookPayload
+from app.prompts import render_system_prompt
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,7 +33,7 @@ async def verify_webhook(
 async def receive_webhook(request: Request) -> Response:
     """Handle an inbound message: store it, ask the LLM, send the reply.
 
-    Always returns 200 so Meta does not retry; non-text events are ignored.
+    Always returns 200 so Meta does not retry; non-text events and unknown numbers are ignored.
     """
     try:
         payload = WebhookPayload.model_validate(await request.json())
@@ -45,14 +46,23 @@ async def receive_webhook(request: Request) -> Response:
         return Response(status_code=200)
 
     state = request.app.state
+    clinic = state.clinics.by_phone_number_id(message.phone_number_id)
+    if clinic is None:
+        logger.warning(
+            "No clinic registered for phone_number_id=%r; ignoring message",
+            message.phone_number_id,
+        )
+        return Response(status_code=200)
+
     phone = message.from_number
 
     try:
-        state.conversations.add_user(phone, message.text)
-        reply = await state.llm.reply(state.conversations.get(phone))
-        state.conversations.add_assistant(phone, reply)
-        await state.whatsapp.send_text(phone, reply)
+        state.conversations.add_user(clinic.id, phone, message.text)
+        history = state.conversations.get(clinic.id, phone)
+        reply = await state.llm.reply(history, render_system_prompt(clinic))
+        state.conversations.add_assistant(clinic.id, phone, reply)
+        await state.whatsapp.send_text(clinic, phone, reply)
     except Exception:
-        logger.exception("Failed to process WhatsApp webhook message")
+        logger.exception("Failed to process WhatsApp webhook message for clinic %s", clinic.id)
 
     return Response(status_code=200)

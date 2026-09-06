@@ -1,11 +1,10 @@
-"""Async LLM client: turns conversation history into an assistant reply."""
+"""Async LLM client: turns a system prompt plus conversation history into a reply."""
 
 from __future__ import annotations
 
 from openai import AsyncOpenAI
 
 from app.config import Settings
-from app.prompts import SYSTEM_PROMPT
 
 
 class LLMClient:
@@ -16,9 +15,9 @@ class LLMClient:
             base_url=settings.llm_base_url or None,
         )
 
-    async def reply(self, history: list[dict[str, str]]) -> str:
-        """Generate the assistant reply for the given conversation history."""
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history]
+    async def reply(self, history: list[dict[str, str]], system_prompt: str) -> str:
+        """Generate the assistant reply for the given clinic prompt and history."""
+        messages = [{"role": "system", "content": system_prompt}, *history]
         response = await self._client.chat.completions.create(
             model=self._model,
             messages=messages,  # type: ignore[arg-type]

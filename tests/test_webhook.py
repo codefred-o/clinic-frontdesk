@@ -5,11 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
+from conftest import GREENFIELD_PHONE_NUMBER_ID, SUNRISE_PHONE_NUMBER_ID
 
 VERIFY_TOKEN = "test-verify-token"
 
 
-def _inbound_payload(from_number: str, text: str) -> dict:
+def _inbound_payload(
+    from_number: str,
+    text: str,
+    phone_number_id: str = SUNRISE_PHONE_NUMBER_ID,
+) -> dict:
     return {
         "object": "whatsapp_business_account",
         "entry": [
@@ -20,6 +28,10 @@ def _inbound_payload(from_number: str, text: str) -> dict:
                         "field": "messages",
                         "value": {
                             "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "2349000000000",
+                                "phone_number_id": phone_number_id,
+                            },
                             "messages": [
                                 {
                                     "from": from_number,
@@ -77,7 +89,7 @@ def test_inbound_text_triggers_reply(client, fake_llm: Any, fake_whatsapp: Any):
     assert history[-1] == {"role": "user", "content": "Hello"}
 
     # The reply was sent back to the same number.
-    assert fake_whatsapp.sent == [("2348012345678", fake_llm.reply_text)]
+    assert fake_whatsapp.sent == [("sunrise-dental", "2348012345678", fake_llm.reply_text)]
 
 
 def test_non_text_event_is_ignored(client, fake_llm: Any, fake_whatsapp: Any):
@@ -146,6 +158,7 @@ def test_webhook_processes_first_text_across_entries(
                 "changes": [
                     {
                         "value": {
+                            "metadata": {"phone_number_id": SUNRISE_PHONE_NUMBER_ID},
                             "messages": [
                                 {
                                     "from": "2348012345678",
@@ -165,7 +178,7 @@ def test_webhook_processes_first_text_across_entries(
 
     assert resp.status_code == 200
     assert fake_llm.calls[0][-1] == {"role": "user", "content": "Book cleaning"}
-    assert fake_whatsapp.sent == [("2348012345678", fake_llm.reply_text)]
+    assert fake_whatsapp.sent == [("sunrise-dental", "2348012345678", fake_llm.reply_text)]
 
 
 def test_downstream_whatsapp_failure_returns_200(
@@ -174,7 +187,7 @@ def test_downstream_whatsapp_failure_returns_200(
     fake_whatsapp: Any,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    async def fail_send_text(to: str, text: str) -> None:
+    async def fail_send_text(clinic: Any, to: str, text: str) -> None:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(fake_whatsapp, "send_text", fail_send_text)
@@ -184,3 +197,122 @@ def test_downstream_whatsapp_failure_returns_200(
     assert resp.status_code == 200
     assert fake_llm.calls[0][-1] == {"role": "user", "content": "Hello"}
     assert fake_whatsapp.sent == []
+
+
+def test_lifespan_loads_clinics_from_clinics_dir():
+    with TestClient(app):
+        registry = app.state.clinics
+
+    assert registry.by_id("sunrise-dental") is not None
+    assert registry.by_phone_number_id(SUNRISE_PHONE_NUMBER_ID) is not None
+
+
+def test_unknown_phone_number_id_is_logged_and_ignored(
+    client, fake_llm: Any, fake_whatsapp: Any, caplog: pytest.LogCaptureFixture
+):
+    with caplog.at_level("WARNING", logger="app.routes.webhook"):
+        resp = client.post(
+            "/webhook",
+            json=_inbound_payload("2348012345678", "Hello", phone_number_id="999"),
+        )
+
+    assert resp.status_code == 200
+    assert fake_llm.calls == []
+    assert fake_whatsapp.sent == []
+    assert "No clinic registered for phone_number_id='999'" in caplog.text
+
+
+def test_text_without_metadata_is_ignored(client, fake_llm: Any, fake_whatsapp: Any):
+    payload = _inbound_payload("2348012345678", "Hello")
+    del payload["entry"][0]["changes"][0]["value"]["metadata"]
+
+    resp = client.post("/webhook", json=payload)
+
+    assert resp.status_code == 200
+    assert fake_llm.calls == []
+    assert fake_whatsapp.sent == []
+
+
+def test_message_to_second_clinic_number_is_processed(client, fake_llm: Any, fake_whatsapp: Any):
+    resp = client.post(
+        "/webhook",
+        json=_inbound_payload("2348012345678", "Hello", phone_number_id=GREENFIELD_PHONE_NUMBER_ID),
+    )
+
+    assert resp.status_code == 200
+    assert len(fake_llm.calls) == 1
+    assert fake_whatsapp.sent == [("greenfield-medical", "2348012345678", fake_llm.reply_text)]
+
+
+def test_conversations_are_isolated_per_clinic(client, fake_llm: Any):
+    client.post("/webhook", json=_inbound_payload("2348000000000", "Hello Sunrise"))
+    client.post(
+        "/webhook",
+        json=_inbound_payload(
+            "2348000000000", "Hello Greenfield", phone_number_id=GREENFIELD_PHONE_NUMBER_ID
+        ),
+    )
+
+    # Same patient phone, different clinic: the second history starts fresh.
+    assert [m["content"] for m in fake_llm.calls[1]] == ["Hello Greenfield"]
+
+
+def test_reply_uses_the_receiving_clinics_prompt(client, fake_llm: Any):
+    client.post("/webhook", json=_inbound_payload("2348012345678", "How much is a root canal?"))
+    client.post(
+        "/webhook",
+        json=_inbound_payload(
+            "2348012345678", "Do you do malaria tests?", phone_number_id=GREENFIELD_PHONE_NUMBER_ID
+        ),
+    )
+
+    sunrise_prompt, greenfield_prompt = fake_llm.system_prompts
+    assert "Root Canal Treatment — 90,000–120,000" in sunrise_prompt
+    assert "Malaria Test" not in sunrise_prompt
+    assert "Malaria Test — 5,000" in greenfield_prompt
+    assert "Root Canal" not in greenfield_prompt
+
+
+def test_f1_acceptance_clinic_a_answers_with_a_facts_never_b(client, fake_llm: Any, fake_whatsapp: Any):
+    """PRD F1: a message to clinic A's number answers with A's prices and never B's."""
+    client.post(
+        "/webhook",
+        json=_inbound_payload("2348012345678", "How much is a root canal?"),
+    )
+    client.post(
+        "/webhook",
+        json=_inbound_payload(
+            "2348098765432", "How much is a malaria test?", phone_number_id=GREENFIELD_PHONE_NUMBER_ID
+        ),
+    )
+
+    sunrise_prompt, greenfield_prompt = fake_llm.system_prompts
+    assert "Root Canal Treatment — 90,000–120,000" in sunrise_prompt
+    assert "Greenfield" not in sunrise_prompt
+    assert "Malaria Test — 5,000" in greenfield_prompt
+    assert "Sunrise" not in greenfield_prompt
+
+    assert fake_whatsapp.sent == [
+        ("sunrise-dental", "2348012345678", fake_llm.reply_text),
+        ("greenfield-medical", "2348098765432", fake_llm.reply_text),
+    ]
+
+
+def test_f1_acceptance_single_clinic_deployment_behaves_identically(
+    single_clinic_client, fake_llm: Any, fake_whatsapp: Any
+):
+    """PRD F1 degenerate case: one config, same behaviour as the single-tenant demo."""
+    resp = single_clinic_client.post("/webhook", json=_inbound_payload("2348012345678", "Hello"))
+
+    assert resp.status_code == 200
+    assert fake_llm.calls[0][-1] == {"role": "user", "content": "Hello"}
+    assert "Sunrise Dental & Family Clinic" in fake_llm.system_prompts[0]
+    assert fake_whatsapp.sent == [("sunrise-dental", "2348012345678", fake_llm.reply_text)]
+
+    # A number that belongs to no clinic in a one-clinic deployment is dropped, not misrouted.
+    resp = single_clinic_client.post(
+        "/webhook",
+        json=_inbound_payload("2348012345678", "Hello", phone_number_id=GREENFIELD_PHONE_NUMBER_ID),
+    )
+    assert resp.status_code == 200
+    assert len(fake_whatsapp.sent) == 1
