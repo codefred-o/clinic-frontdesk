@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = ""
     whatsapp_api_version: str = "v20.0"
 
+    # Clinics: directory of per-clinic YAML files (one file per clinic)
+    clinics_dir: str = "clinics"
+
     # LLM (OpenAI-compatible)
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"

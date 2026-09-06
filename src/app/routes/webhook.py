@@ -32,7 +32,7 @@ async def verify_webhook(
 async def receive_webhook(request: Request) -> Response:
     """Handle an inbound message: store it, ask the LLM, send the reply.
 
-    Always returns 200 so Meta does not retry; non-text events are ignored.
+    Always returns 200 so Meta does not retry; non-text events and unknown numbers are ignored.
     """
     try:
         payload = WebhookPayload.model_validate(await request.json())
@@ -45,6 +45,14 @@ async def receive_webhook(request: Request) -> Response:
         return Response(status_code=200)
 
     state = request.app.state
+    clinic = state.clinics.by_phone_number_id(message.phone_number_id)
+    if clinic is None:
+        logger.warning(
+            "No clinic registered for phone_number_id=%r; ignoring message",
+            message.phone_number_id,
+        )
+        return Response(status_code=200)
+
     phone = message.from_number
 
     try:
@@ -53,6 +61,6 @@ async def receive_webhook(request: Request) -> Response:
         state.conversations.add_assistant(phone, reply)
         await state.whatsapp.send_text(phone, reply)
     except Exception:
-        logger.exception("Failed to process WhatsApp webhook message")
+        logger.exception("Failed to process WhatsApp webhook message for clinic %s", clinic.id)
 
     return Response(status_code=200)

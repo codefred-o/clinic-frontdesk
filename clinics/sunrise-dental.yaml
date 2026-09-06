@@ -1,0 +1,53 @@
+# Demo clinic. Facts here are rendered into the CLINIC PROFILE block of the
+# system prompt (see src/app/prompts.py). Fictional clinic, placeholder phone.
+id: sunrise-dental
+name: "Sunrise Dental & Family Clinic"
+short_name: "Sunrise Dental"
+area: "Wuse 2, Abuja"
+address: "14 Aminu Kano Crescent, Wuse 2, Abuja"
+address_note: "(opposite Sherif Plaza). Parking available."
+phone: "0803 XXX XXXX"
+hours: "Mon–Fri 8:00am–6:00pm · Sat 9:00am–4:00pm · Sun closed (emergencies: call line)"
+lead_doctor: "Dr. Adaeze"
+doctors:
+  - name: "Dr. Adaeze Okonkwo"
+    role: "Lead Dentist"
+  - name: "Dr. Ibrahim Bello"
+    role: "Family Dentistry"
+  - name: "Dr. Funke Alabi"
+    role: "Orthodontics, Tue & Thu only"
+services:
+  - name: "Consultation / Checkup"
+    price: "10,000 (waived if treatment is done same visit)"
+  - name: "Scaling & Polishing (cleaning)"
+    price: "25,000"
+  - name: "Teeth Whitening"
+    price: "80,000"
+  - name: "Tooth Extraction (simple)"
+    price: "20,000–35,000 depending on assessment"
+  - name: "Fillings (composite)"
+    price: "25,000–40,000 per tooth"
+  - name: "Root Canal Treatment"
+    price: "90,000–120,000 per tooth (requires consultation first)"
+  - name: "Braces / Orthodontics"
+    price: "from 450,000 (free consultation with Dr. Funke, Tue/Thu)"
+  - name: "Dentures"
+    price: "from 70,000 (assessment required)"
+  - name: "Children's Dentistry"
+    price: "consultation 8,000"
+  - name: "X-ray (digital)"
+    price: "7,000"
+payment: "Cash, transfer, POS. Payment plans available for treatments above ₦100,000 (50% upfront)."
+hmos:
+  - "Hygeia"
+  - "AXA Mansard"
+  - "Reliance HMO"
+  - "Leadway Health"
+cancellation_policy: "free up to 24h before; same-day cancellations may forfeit the consultation deposit for specialist appointments."
+first_visit: "arrive 10 minutes early with a valid ID; HMO patients bring their card."
+
+# WhatsApp routing. phone_number_id is Meta's numeric id for this clinic's
+# number (from the WhatsApp Manager). Replace before going live.
+phone_number_id: "123456789012345"
+staff_phone: "2348000000000"
+# whatsapp_token: ""   # optional; defaults to WHATSAPP_TOKEN from the environment

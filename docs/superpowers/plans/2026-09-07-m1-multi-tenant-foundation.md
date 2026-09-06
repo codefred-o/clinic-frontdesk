@@ -961,7 +961,10 @@ Add `from fastapi.testclient import TestClient` to the imports at the top of `te
 - [ ] **Step 4: Run the tests to verify they fail**
 
 Run: `pytest tests/test_webhook.py -v`
-Expected: `test_lifespan_loads_clinics_from_clinics_dir` FAILS with `AttributeError: 'State' object has no attribute 'clinics'`; `test_unknown_phone_number_id_is_logged_and_ignored` and `test_text_without_metadata_is_ignored` FAIL because the fake LLM was called. The pre-existing tests still pass.
+Expected: `test_unknown_phone_number_id_is_logged_and_ignored` and `test_text_without_metadata_is_ignored` FAIL because the fake LLM was called. The pre-existing tests still pass. `test_lifespan_loads_clinics_from_clinics_dir` passes in the full file because an earlier test's `client` fixture already set `app.state.clinics` on the shared app; run it alone to see it fail:
+
+Run: `pytest tests/test_webhook.py::test_lifespan_loads_clinics_from_clinics_dir -v`
+Expected: FAIL with `AttributeError: 'State' object has no attribute 'clinics'`.
 
 - [ ] **Step 5: Load the registry in the lifespan**
 

@@ -5,11 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
+from conftest import GREENFIELD_PHONE_NUMBER_ID, SUNRISE_PHONE_NUMBER_ID
 
 VERIFY_TOKEN = "test-verify-token"
 
 
-def _inbound_payload(from_number: str, text: str) -> dict:
+def _inbound_payload(
+    from_number: str,
+    text: str,
+    phone_number_id: str = SUNRISE_PHONE_NUMBER_ID,
+) -> dict:
     return {
         "object": "whatsapp_business_account",
         "entry": [
@@ -20,6 +28,10 @@ def _inbound_payload(from_number: str, text: str) -> dict:
                         "field": "messages",
                         "value": {
                             "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "2349000000000",
+                                "phone_number_id": phone_number_id,
+                            },
                             "messages": [
                                 {
                                     "from": from_number,
@@ -146,6 +158,7 @@ def test_webhook_processes_first_text_across_entries(
                 "changes": [
                     {
                         "value": {
+                            "metadata": {"phone_number_id": SUNRISE_PHONE_NUMBER_ID},
                             "messages": [
                                 {
                                     "from": "2348012345678",
@@ -184,3 +197,48 @@ def test_downstream_whatsapp_failure_returns_200(
     assert resp.status_code == 200
     assert fake_llm.calls[0][-1] == {"role": "user", "content": "Hello"}
     assert fake_whatsapp.sent == []
+
+
+def test_lifespan_loads_clinics_from_clinics_dir():
+    with TestClient(app):
+        registry = app.state.clinics
+
+    assert registry.by_id("sunrise-dental") is not None
+    assert registry.by_phone_number_id(SUNRISE_PHONE_NUMBER_ID) is not None
+
+
+def test_unknown_phone_number_id_is_logged_and_ignored(
+    client, fake_llm: Any, fake_whatsapp: Any, caplog: pytest.LogCaptureFixture
+):
+    with caplog.at_level("WARNING", logger="app.routes.webhook"):
+        resp = client.post(
+            "/webhook",
+            json=_inbound_payload("2348012345678", "Hello", phone_number_id="999"),
+        )
+
+    assert resp.status_code == 200
+    assert fake_llm.calls == []
+    assert fake_whatsapp.sent == []
+    assert "No clinic registered for phone_number_id='999'" in caplog.text
+
+
+def test_text_without_metadata_is_ignored(client, fake_llm: Any, fake_whatsapp: Any):
+    payload = _inbound_payload("2348012345678", "Hello")
+    del payload["entry"][0]["changes"][0]["value"]["metadata"]
+
+    resp = client.post("/webhook", json=payload)
+
+    assert resp.status_code == 200
+    assert fake_llm.calls == []
+    assert fake_whatsapp.sent == []
+
+
+def test_message_to_second_clinic_number_is_processed(client, fake_llm: Any, fake_whatsapp: Any):
+    resp = client.post(
+        "/webhook",
+        json=_inbound_payload("2348012345678", "Hello", phone_number_id=GREENFIELD_PHONE_NUMBER_ID),
+    )
+
+    assert resp.status_code == 200
+    assert len(fake_llm.calls) == 1
+    assert len(fake_whatsapp.sent) == 1

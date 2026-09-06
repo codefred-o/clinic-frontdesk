@@ -16,6 +16,38 @@ from app.main import app  # noqa: E402
 
 VERIFY_TOKEN = "test-verify-token"
 
+from pathlib import Path  # noqa: E402
+
+from app.models.clinic import ClinicConfig, Doctor, Service  # noqa: E402
+from app.services.registry import ClinicRegistry, load_clinic_file  # noqa: E402
+
+SUNRISE = load_clinic_file(Path("clinics/sunrise-dental.yaml"))
+SUNRISE_PHONE_NUMBER_ID = SUNRISE.phone_number_id
+
+# A second, deliberately different clinic so tests can prove isolation.
+GREENFIELD = ClinicConfig(
+    id="greenfield-medical",
+    name="Greenfield Medical Centre",
+    short_name="Greenfield",
+    area="Lekki Phase 1, Lagos",
+    address="5 Admiralty Way, Lekki Phase 1, Lagos",
+    phone="0701 000 0000",
+    hours="Mon–Sat 8:00am–8:00pm · Sun 10:00am–4:00pm",
+    lead_doctor="Dr. Tunde",
+    doctors=[Doctor(name="Dr. Tunde Bakare", role="Medical Director")],
+    services=[
+        Service(name="General Consultation", price="15,000"),
+        Service(name="Malaria Test", price="5,000"),
+    ],
+    payment="Cash, transfer, POS.",
+    hmos=["Avon HMO"],
+    cancellation_policy="free up to 12h before.",
+    first_visit="bring a valid ID.",
+    phone_number_id="222000000000000",
+    staff_phone="2347010000000",
+)
+GREENFIELD_PHONE_NUMBER_ID = GREENFIELD.phone_number_id
+
 
 class FakeLLM:
     """Records the history it was given and returns a canned reply."""
@@ -60,6 +92,17 @@ def fake_whatsapp() -> FakeWhatsApp:
 def client(fake_llm: FakeLLM, fake_whatsapp: FakeWhatsApp):
     with TestClient(app) as test_client:
         # Override the real services wired by the lifespan with fakes.
+        app.state.clinics = ClinicRegistry([SUNRISE, GREENFIELD])
+        app.state.llm = fake_llm
+        app.state.whatsapp = fake_whatsapp
+        yield test_client
+
+
+@pytest.fixture
+def single_clinic_client(fake_llm: FakeLLM, fake_whatsapp: FakeWhatsApp):
+    """Same app, but a registry with exactly one clinic (the degenerate case)."""
+    with TestClient(app) as test_client:
+        app.state.clinics = ClinicRegistry([SUNRISE])
         app.state.llm = fake_llm
         app.state.whatsapp = fake_whatsapp
         yield test_client
