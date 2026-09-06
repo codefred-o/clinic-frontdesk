@@ -32,8 +32,16 @@ class Message(_Lenient):
         super().__init__(**data)
 
 
+class Metadata(_Lenient):
+    """The business phone number the message was sent to."""
+
+    display_phone_number: str | None = None
+    phone_number_id: str | None = None
+
+
 class Value(_Lenient):
     messaging_product: str | None = None
+    metadata: Metadata | None = None
     messages: list[Message] = []
 
 
@@ -55,12 +63,15 @@ class WebhookPayload(_Lenient):
         """Return the first inbound text message, normalized, if present."""
         for entry in self.entry:
             for change in entry.changes:
+                metadata = change.value.metadata
+                phone_number_id = metadata.phone_number_id if metadata else None
                 for message in change.value.messages:
                     if message.type == "text" and message.text is not None:
                         return IncomingMessage(
                             from_number=message.from_,
                             message_id=message.id,
                             text=message.text.body,
+                            phone_number_id=phone_number_id,
                         )
         return None
 
@@ -71,3 +82,4 @@ class IncomingMessage(BaseModel):
     from_number: str
     message_id: str
     text: str
+    phone_number_id: str | None = None
