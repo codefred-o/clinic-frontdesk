@@ -9,6 +9,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import ValidationError
 
 from app.models.whatsapp import WebhookPayload
+from app.prompts import render_system_prompt
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -57,7 +58,8 @@ async def receive_webhook(request: Request) -> Response:
 
     try:
         state.conversations.add_user(clinic.id, phone, message.text)
-        reply = await state.llm.reply(state.conversations.get(clinic.id, phone))
+        history = state.conversations.get(clinic.id, phone)
+        reply = await state.llm.reply(history, render_system_prompt(clinic))
         state.conversations.add_assistant(clinic.id, phone, reply)
         await state.whatsapp.send_text(phone, reply)
     except Exception:

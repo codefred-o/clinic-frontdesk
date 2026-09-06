@@ -50,14 +50,16 @@ GREENFIELD_PHONE_NUMBER_ID = GREENFIELD.phone_number_id
 
 
 class FakeLLM:
-    """Records the history it was given and returns a canned reply."""
+    """Records the history and system prompt it was given and returns a canned reply."""
 
     def __init__(self, reply: str = "Good morning! How can I help? 🙂") -> None:
         self.reply_text = reply
         self.calls: list[list[dict[str, str]]] = []
+        self.system_prompts: list[str] = []
 
-    async def reply(self, history: list[dict[str, str]]) -> str:
+    async def reply(self, history: list[dict[str, str]], system_prompt: str) -> str:
         self.calls.append(history)
+        self.system_prompts.append(system_prompt)
         return self.reply_text
 
 

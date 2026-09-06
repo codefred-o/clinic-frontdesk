@@ -255,3 +255,19 @@ def test_conversations_are_isolated_per_clinic(client, fake_llm: Any):
 
     # Same patient phone, different clinic: the second history starts fresh.
     assert [m["content"] for m in fake_llm.calls[1]] == ["Hello Greenfield"]
+
+
+def test_reply_uses_the_receiving_clinics_prompt(client, fake_llm: Any):
+    client.post("/webhook", json=_inbound_payload("2348012345678", "How much is a root canal?"))
+    client.post(
+        "/webhook",
+        json=_inbound_payload(
+            "2348012345678", "Do you do malaria tests?", phone_number_id=GREENFIELD_PHONE_NUMBER_ID
+        ),
+    )
+
+    sunrise_prompt, greenfield_prompt = fake_llm.system_prompts
+    assert "Root Canal Treatment — 90,000–120,000" in sunrise_prompt
+    assert "Malaria Test" not in sunrise_prompt
+    assert "Malaria Test — 5,000" in greenfield_prompt
+    assert "Root Canal" not in greenfield_prompt

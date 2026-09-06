@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 
 from app.config import Settings
-from app.prompts import SYSTEM_PROMPT
 from app.services import llm as llm_module
 from app.services.llm import LLMClient
 
@@ -65,14 +64,14 @@ def _reset_fake_openai(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_reply_sends_system_prompt_plus_conversation_history() -> None:
+async def test_reply_sends_given_system_prompt_plus_conversation_history() -> None:
     client = LLMClient(_settings())
     history = [
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "Good morning"},
     ]
 
-    await client.reply(history)
+    await client.reply(history, "You are the front desk for Clinic X.")
 
     fake_openai = FakeAsyncOpenAI.instances[0]
     assert fake_openai.api_key == "test-key"
@@ -80,7 +79,10 @@ async def test_reply_sends_system_prompt_plus_conversation_history() -> None:
     assert fake_openai.calls == [
         {
             "model": "demo-model",
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *history],
+            "messages": [
+                {"role": "system", "content": "You are the front desk for Clinic X."},
+                *history,
+            ],
             "temperature": 0.4,
         }
     ]
@@ -90,7 +92,7 @@ async def test_reply_sends_system_prompt_plus_conversation_history() -> None:
 async def test_reply_strips_provider_content() -> None:
     client = LLMClient(_settings())
 
-    reply = await client.reply([{"role": "user", "content": "Hello"}])
+    reply = await client.reply([{"role": "user", "content": "Hello"}], "system")
 
     assert reply == "Reply text"
 
@@ -100,6 +102,6 @@ async def test_reply_returns_empty_string_when_provider_content_is_none() -> Non
     FakeAsyncOpenAI.reply_content = None
     client = LLMClient(_settings())
 
-    reply = await client.reply([{"role": "user", "content": "Hello"}])
+    reply = await client.reply([{"role": "user", "content": "Hello"}], "system")
 
     assert reply == ""
