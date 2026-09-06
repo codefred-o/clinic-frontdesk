@@ -271,3 +271,48 @@ def test_reply_uses_the_receiving_clinics_prompt(client, fake_llm: Any):
     assert "Malaria Test" not in sunrise_prompt
     assert "Malaria Test — 5,000" in greenfield_prompt
     assert "Root Canal" not in greenfield_prompt
+
+
+def test_f1_acceptance_clinic_a_answers_with_a_facts_never_b(client, fake_llm: Any, fake_whatsapp: Any):
+    """PRD F1: a message to clinic A's number answers with A's prices and never B's."""
+    client.post(
+        "/webhook",
+        json=_inbound_payload("2348012345678", "How much is a root canal?"),
+    )
+    client.post(
+        "/webhook",
+        json=_inbound_payload(
+            "2348098765432", "How much is a malaria test?", phone_number_id=GREENFIELD_PHONE_NUMBER_ID
+        ),
+    )
+
+    sunrise_prompt, greenfield_prompt = fake_llm.system_prompts
+    assert "Root Canal Treatment — 90,000–120,000" in sunrise_prompt
+    assert "Greenfield" not in sunrise_prompt
+    assert "Malaria Test — 5,000" in greenfield_prompt
+    assert "Sunrise" not in greenfield_prompt
+
+    assert fake_whatsapp.sent == [
+        ("sunrise-dental", "2348012345678", fake_llm.reply_text),
+        ("greenfield-medical", "2348098765432", fake_llm.reply_text),
+    ]
+
+
+def test_f1_acceptance_single_clinic_deployment_behaves_identically(
+    single_clinic_client, fake_llm: Any, fake_whatsapp: Any
+):
+    """PRD F1 degenerate case: one config, same behaviour as the single-tenant demo."""
+    resp = single_clinic_client.post("/webhook", json=_inbound_payload("2348012345678", "Hello"))
+
+    assert resp.status_code == 200
+    assert fake_llm.calls[0][-1] == {"role": "user", "content": "Hello"}
+    assert "Sunrise Dental & Family Clinic" in fake_llm.system_prompts[0]
+    assert fake_whatsapp.sent == [("sunrise-dental", "2348012345678", fake_llm.reply_text)]
+
+    # A number that belongs to no clinic in a one-clinic deployment is dropped, not misrouted.
+    resp = single_clinic_client.post(
+        "/webhook",
+        json=_inbound_payload("2348012345678", "Hello", phone_number_id=GREENFIELD_PHONE_NUMBER_ID),
+    )
+    assert resp.status_code == 200
+    assert len(fake_whatsapp.sent) == 1

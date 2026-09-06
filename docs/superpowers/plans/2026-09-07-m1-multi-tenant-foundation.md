@@ -2003,7 +2003,7 @@ Expected: `All checks passed!` and `62 passed`.
 - [ ] **Step 5: Prove the degenerate case against the real directory**
 
 ```bash
-CLINICS_DIR=clinics python -c "
+PYTHONPATH=src CLINICS_DIR=clinics WHATSAPP_VERIFY_TOKEN=x LLM_API_KEY=x python -c "
 from fastapi.testclient import TestClient
 from app.main import app
 with TestClient(app) as c:
@@ -2011,7 +2011,7 @@ with TestClient(app) as c:
 "
 ```
 
-Expected output: `1 {'status': 'ok'}`.
+Expected output: `1 {'status': 'ok'}`. `PYTHONPATH=src` matters when working in a git worktree: the editable install points at the main checkout's `src`, and without it this command would import the old single-tenant app.
 
 - [ ] **Step 6: Commit**
 
