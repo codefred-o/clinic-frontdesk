@@ -64,13 +64,13 @@ class FakeLLM:
 
 
 class FakeWhatsApp:
-    """Records outbound sends instead of hitting the Graph API."""
+    """Records outbound sends as (clinic_id, to, text) instead of hitting the Graph API."""
 
     def __init__(self) -> None:
-        self.sent: list[tuple[str, str]] = []
+        self.sent: list[tuple[str, str, str]] = []
 
-    async def send_text(self, to: str, text: str) -> None:
-        self.sent.append((to, text))
+    async def send_text(self, clinic: ClinicConfig, to: str, text: str) -> None:
+        self.sent.append((clinic.id, to, text))
 
 
 @pytest.fixture(autouse=True)

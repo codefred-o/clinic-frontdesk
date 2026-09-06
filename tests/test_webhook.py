@@ -89,7 +89,7 @@ def test_inbound_text_triggers_reply(client, fake_llm: Any, fake_whatsapp: Any):
     assert history[-1] == {"role": "user", "content": "Hello"}
 
     # The reply was sent back to the same number.
-    assert fake_whatsapp.sent == [("2348012345678", fake_llm.reply_text)]
+    assert fake_whatsapp.sent == [("sunrise-dental", "2348012345678", fake_llm.reply_text)]
 
 
 def test_non_text_event_is_ignored(client, fake_llm: Any, fake_whatsapp: Any):
@@ -178,7 +178,7 @@ def test_webhook_processes_first_text_across_entries(
 
     assert resp.status_code == 200
     assert fake_llm.calls[0][-1] == {"role": "user", "content": "Book cleaning"}
-    assert fake_whatsapp.sent == [("2348012345678", fake_llm.reply_text)]
+    assert fake_whatsapp.sent == [("sunrise-dental", "2348012345678", fake_llm.reply_text)]
 
 
 def test_downstream_whatsapp_failure_returns_200(
@@ -187,7 +187,7 @@ def test_downstream_whatsapp_failure_returns_200(
     fake_whatsapp: Any,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    async def fail_send_text(to: str, text: str) -> None:
+    async def fail_send_text(clinic: Any, to: str, text: str) -> None:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(fake_whatsapp, "send_text", fail_send_text)
@@ -241,7 +241,7 @@ def test_message_to_second_clinic_number_is_processed(client, fake_llm: Any, fak
 
     assert resp.status_code == 200
     assert len(fake_llm.calls) == 1
-    assert len(fake_whatsapp.sent) == 1
+    assert fake_whatsapp.sent == [("greenfield-medical", "2348012345678", fake_llm.reply_text)]
 
 
 def test_conversations_are_isolated_per_clinic(client, fake_llm: Any):

@@ -6,7 +6,9 @@ import httpx
 import pytest
 
 from app.config import Settings
+from app.models.clinic import ClinicConfig
 from app.services.whatsapp import WhatsAppClient
+from conftest import GREENFIELD
 
 
 class FakeResponse:
@@ -33,20 +35,23 @@ class FakeAsyncClient:
 def _settings() -> Settings:
     return Settings(
         whatsapp_token="token-123",
-        whatsapp_phone_number_id="phone-id",
         whatsapp_api_version="v20.0",
         whatsapp_verify_token="verify-token",
         llm_api_key="test-key",
     )
 
 
+def _clinic(token: str | None = None) -> ClinicConfig:
+    return GREENFIELD.model_copy(update={"phone_number_id": "phone-id", "whatsapp_token": token})
+
+
 @pytest.mark.asyncio
-async def test_send_text_posts_expected_graph_api_payload() -> None:
+async def test_send_text_posts_to_the_clinics_number_with_shared_token() -> None:
     response = FakeResponse()
     http = FakeAsyncClient(response)
     client = WhatsAppClient(_settings(), http)  # type: ignore[arg-type]
 
-    await client.send_text("2348012345678", "Hello")
+    await client.send_text(_clinic(), "2348012345678", "Hello")
 
     assert http.calls == [
         {
@@ -64,6 +69,16 @@ async def test_send_text_posts_expected_graph_api_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_text_prefers_the_clinics_own_token() -> None:
+    http = FakeAsyncClient(FakeResponse())
+    client = WhatsAppClient(_settings(), http)  # type: ignore[arg-type]
+
+    await client.send_text(_clinic(token="clinic-token"), "2348012345678", "Hello")
+
+    assert http.calls[0]["headers"] == {"Authorization": "Bearer clinic-token"}
+
+
+@pytest.mark.asyncio
 async def test_send_text_surfaces_graph_api_failure() -> None:
     request = httpx.Request("POST", "https://graph.facebook.com/v20.0/phone-id/messages")
     response = httpx.Response(500, request=request)
@@ -72,4 +87,4 @@ async def test_send_text_surfaces_graph_api_failure() -> None:
     client = WhatsAppClient(_settings(), http)  # type: ignore[arg-type]
 
     with pytest.raises(httpx.HTTPStatusError):
-        await client.send_text("2348012345678", "Hello")
+        await client.send_text(_clinic(), "2348012345678", "Hello")

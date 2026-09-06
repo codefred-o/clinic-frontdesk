@@ -61,7 +61,7 @@ async def receive_webhook(request: Request) -> Response:
         history = state.conversations.get(clinic.id, phone)
         reply = await state.llm.reply(history, render_system_prompt(clinic))
         state.conversations.add_assistant(clinic.id, phone, reply)
-        await state.whatsapp.send_text(phone, reply)
+        await state.whatsapp.send_text(clinic, phone, reply)
     except Exception:
         logger.exception("Failed to process WhatsApp webhook message for clinic %s", clinic.id)
 
