@@ -6,6 +6,8 @@ __pycache__/
 venv/
 .pytest_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
 # Env
 .env
@@ -13,3 +15,6 @@ venv/
 
 # OS
 .DS_Store
+
+# Tooling caches
+.opencode/

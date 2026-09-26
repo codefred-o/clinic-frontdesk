@@ -1,55 +1,70 @@
-# Sunrise Dental — WhatsApp Front Desk Demo Bot
+# Vouch
 
-A thin FastAPI webhook server that connects the **WhatsApp Cloud API** to an
-LLM acting as the virtual front desk for the (fictional) *Sunrise Dental &
-Family Clinic*. It answers clinic questions and books/reschedules/cancels
-appointments. Booking confirmations are **faked** — the LLM produces the
-confirmation card inline; there is no real calendar.
+Vouch is a trusted rental marketplace for high-value assets, beginning with media and
+creative gear in Lagos and Abuja. The product is built around verified renter identities,
+platform-controlled payments, deposits, and co-signed handover evidence.
+
+This repository contains the production API foundation. It is intentionally a modular
+FastAPI application so the marketplace domain, Paystack payments, KYC, notifications,
+and future WhatsApp or Telegram clients can evolve behind stable interfaces.
+
+## Current foundation
+
+- Versioned FastAPI API with an application factory
+- Validated, environment-prefixed configuration
+- Async PostgreSQL engine lifecycle with connection health checks
+- Separate liveness and readiness endpoints
+- Request correlation IDs and structured completion logs
+- Explicit CORS policy for the future web client
+- Automated lint, test, and coverage checks in CI
 
 ## Architecture
 
-```
-WhatsApp Cloud API  →  POST /webhook  →  conversation store  →  LLM  →  send reply (Graph API)
-                       GET  /webhook  →  verify-token handshake
+```text
+Web client / channel adapters
+            |
+        /api/v1
+            |
+   FastAPI modular monolith
+            |
+ Async SQLAlchemy + PostgreSQL
 ```
 
-- `src/app/prompts.py` — the system prompt + clinic profile (single source of truth)
-- `src/app/services/llm.py` — async LLM call
-- `src/app/services/whatsapp.py` — async outbound message sender
-- `src/app/services/conversation.py` — in-memory per-user history (lost on restart; fine for a demo)
-- `src/app/routes/webhook.py` — verification + inbound message handling
+The modular monolith is the deliberate v1 boundary: it keeps transactions and operations
+simple while leaving clean seams for payments, identity, inventory, and bookings.
 
-## Setup
+## Local setup
+
+Requirements: Python 3.11+ and PostgreSQL.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env   # then fill in your tokens
-```
-
-## Run
-
-```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+cp .env.example .env
 uvicorn app.main:app --reload --app-dir src
 ```
 
-Expose it for WhatsApp (e.g. ngrok), then register the webhook URL in the Meta
-App dashboard using the same `WHATSAPP_VERIFY_TOKEN` you set in `.env`.
+All application environment variables use the `VOUCH_` prefix. The example configuration
+is safe for local development only; use managed secrets and managed PostgreSQL in deployed
+environments.
+
+## Operational endpoints
+
+- `GET /api/v1/health/live` verifies that the API process is running.
+- `GET /api/v1/health/ready` verifies that required dependencies are available.
+- API documentation is available at `/docs` outside production.
+
+## Quality checks
 
 ```bash
-ngrok http 8000
+ruff format --check .
+ruff check .
+pytest --cov=app --cov-report=term-missing
 ```
 
-## Test
+## Backups
 
-```bash
-pytest
-```
-
-## Demo script
-
-1. "This is a fictional clinic. Try to stump it."
-2. "Ask the price of a root canal." → instant, correct answer.
-3. "Ask if they take your HMO." → handled.
-4. "Now book an appointment for Saturday." → full booking flow + confirmation card.
-5. Closer: "Imagine that's your clinic, answering at 11pm while you sleep."
+Production PostgreSQL must use encrypted automated backups, point-in-time recovery, and a
+regular restore drill. Backup policy is an infrastructure responsibility and must be
+validated before handling real bookings or payment records.

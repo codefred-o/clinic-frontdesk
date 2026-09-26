@@ -2,12 +2,32 @@ name: CI
 
 on:
   push:
-    branches: [main, base-setuo]
+    branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: vouch_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vouch_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      VOUCH_TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/vouch_test
 
     steps:
       - name: Check out repository
@@ -17,12 +37,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
       - name: Install dependencies
         run: python -m pip install -e ".[dev]"
 
+      - name: Check formatting
+        run: ruff format --check .
+
       - name: Run lint
         run: ruff check .
 
-      - name: Run tests
-        run: pytest
+      - name: Run tests with coverage
+        run: pytest --cov=app --cov-report=term-missing
