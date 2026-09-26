@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -11,21 +12,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.core.config import Settings, get_settings
-
-_settings: Settings = get_settings()
-
-_engine: AsyncEngine = create_async_engine(
-    _settings.database_url,
-    pool_pre_ping=True,
-    pool_size=_settings.database_pool_size,
-    max_overflow=_settings.database_max_overflow,
-)
-
-AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    bind=_engine,
-    expire_on_commit=False,
-)
+from app.core.config import Settings
 
 
 def create_database_engine(settings: Settings) -> AsyncEngine:
@@ -39,8 +26,16 @@ def create_database_engine(settings: Settings) -> AsyncEngine:
     )
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+def create_database_sessionmaker(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    """Build the session factory bound to an application engine."""
+
+    return async_sessionmaker(bind=engine, expire_on_commit=False)
+
+
+async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a database session per request."""
 
-    async with AsyncSessionLocal() as session:
+    async with request.app.state.sessionmaker() as session:
         yield session

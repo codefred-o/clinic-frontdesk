@@ -7,7 +7,7 @@ import uuid
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import Boolean, Date, Enum, ForeignKey, Index, Numeric, Text, text
+from sqlalchemy import Boolean, CheckConstraint, Date, Enum, ForeignKey, Index, Numeric, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -56,7 +56,11 @@ class Asset(TimestampMixin, SoftDeleteMixin, Base):
     )
     condition_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    __table_args__ = (Index("ix_assets_vendor_id", "vendor_id"),)
+    __table_args__ = (
+        CheckConstraint("daily_rate > 0", name="ck_assets_daily_rate_positive"),
+        CheckConstraint("deposit_amount >= 0", name="ck_assets_deposit_amount_nonnegative"),
+        Index("ix_assets_vendor_id", "vendor_id"),
+    )
 
     vendor: Mapped[object] = relationship(
         "User",
@@ -96,7 +100,13 @@ class AvailabilityWindow(TimestampMixin, Base):
     ends_at: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
-    __table_args__ = (Index("ix_availability_windows_asset_id", "asset_id"),)
+    __table_args__ = (
+        CheckConstraint(
+            "starts_at <= ends_at",
+            name="ck_availability_windows_valid_date_range",
+        ),
+        Index("ix_availability_windows_asset_id", "asset_id"),
+    )
 
     asset: Mapped[object] = relationship(
         "Asset",

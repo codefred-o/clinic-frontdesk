@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, request_context_middleware
-from app.db.session import create_database_engine
+from app.db.session import create_database_engine, create_database_sessionmaker
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,11 +23,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(runtime_settings.debug)
         app.state.settings = runtime_settings
-        app.state.database_engine = create_database_engine(runtime_settings)
+        engine = create_database_engine(runtime_settings)
+        app.state.database_engine = engine
+        app.state.sessionmaker = create_database_sessionmaker(engine)
         try:
             yield
         finally:
-            await app.state.database_engine.dispose()
+            await engine.dispose()
 
     application = FastAPI(
         title=runtime_settings.app_name,

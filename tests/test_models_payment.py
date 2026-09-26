@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Enum
+from datetime import UTC, datetime
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy import CheckConstraint, Enum
 from sqlalchemy.dialects.postgresql import JSONB
 
 import app.db.models  # noqa: F401
 from app.db.base import Base
+from app.db.models.booking import BookingStatus
+from app.db.models.handover import HandoverDirection, HandoverRecord, HandoverStatus
+from app.db.models.payment import DepositStatus, Payment, PaymentType, PayoutStatus
 
 
 def _table(name: str):
@@ -31,3 +38,168 @@ def test_payments_booking_id_fk_references_bookings() -> None:
     col = _table("payments").c["booking_id"]
     fk_targets = {fk.target_fullname for fk in col.foreign_keys}
     assert "bookings.id" in fk_targets
+
+
+def test_payment_amount_is_positive() -> None:
+    checks = {
+        str(constraint.sqltext)
+        for constraint in _table("payments").constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert "amount > 0" in checks
+
+
+def test_deposit_lifecycle_is_forward_only_from_held() -> None:
+    assert DepositStatus.held.can_transition_to(DepositStatus.released)
+    assert DepositStatus.held.can_transition_to(DepositStatus.claimed)
+    assert not DepositStatus.released.can_transition_to(DepositStatus.held)
+    assert not DepositStatus.claimed.can_transition_to(DepositStatus.held)
+
+
+def test_payout_lifecycle_is_forward_only_until_paid() -> None:
+    assert PayoutStatus.pending.can_transition_to(PayoutStatus.eligible)
+    assert PayoutStatus.eligible.can_transition_to(PayoutStatus.paid)
+    assert not PayoutStatus.pending.can_transition_to(PayoutStatus.paid)
+    assert not PayoutStatus.paid.can_transition_to(PayoutStatus.eligible)
+
+
+def test_payment_persists_deposit_and_payout_lifecycle() -> None:
+    table = _table("payments")
+
+    assert isinstance(table.c["deposit_status"].type, Enum)
+    assert isinstance(table.c["payout_status"].type, Enum)
+    assert table.c["deposit_held_at"].nullable
+    assert table.c["deposit_released_at"].nullable
+    assert table.c["deposit_claimed_at"].nullable
+    assert table.c["payout_eligible_at"].nullable
+    assert table.c["paid_at"].nullable
+
+
+def test_payment_persists_paystack_split_and_settlement_fields() -> None:
+    table = _table("payments")
+    checks = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in table.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert table.c["vendor_recipient_code"].nullable
+    assert table.c["vendor_subaccount_code"].nullable
+    assert table.c["platform_fee"].nullable
+    assert table.c["settlement_reference"].nullable
+    assert table.c["settled_at"].nullable
+    assert checks["ck_payments_payout_fields_required"] == (
+        "type <> 'payout' OR (vendor_recipient_code IS NOT NULL AND platform_fee IS NOT NULL)"
+    )
+    assert checks["ck_payments_platform_fee_nonnegative"] == (
+        "platform_fee IS NULL OR platform_fee >= 0"
+    )
+
+
+def test_payment_lifecycle_columns_match_transaction_type() -> None:
+    checks = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in _table("payments").constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert "type = 'deposit'" in checks["ck_payments_deposit_lifecycle_type"]
+    assert "deposit_status IS NOT NULL" in checks["ck_payments_deposit_lifecycle_type"]
+    assert "type = 'payout'" in checks["ck_payments_payout_lifecycle_type"]
+    assert "payout_status IS NOT NULL" in checks["ck_payments_payout_lifecycle_type"]
+    assert "deposit_released_at IS NOT NULL" in checks["ck_payments_deposit_status_timestamps"]
+    assert "deposit_claimed_at IS NOT NULL" in checks["ck_payments_deposit_status_timestamps"]
+    assert "payout_eligible_at IS NOT NULL" in checks["ck_payments_payout_status_timestamps"]
+    assert "paid_at IS NOT NULL" in checks["ck_payments_payout_status_timestamps"]
+
+
+def _completed_return(booking_id: UUID) -> HandoverRecord:
+    signed_at = datetime(2026, 9, 26, 11, tzinfo=UTC)
+    return HandoverRecord(
+        direction=HandoverDirection.return_,
+        status=HandoverStatus.completed,
+        condition_checklist={"items": []},
+        vendor_signer_id="00000000-0000-0000-0000-000000000001",
+        renter_signer_id="00000000-0000-0000-0000-000000000002",
+        vendor_signed_at=signed_at,
+        renter_signed_at=signed_at,
+        evidence_urls=["evidence://return-1"],
+        booking_id=booking_id,
+    )
+
+
+def test_payout_eligibility_requires_completed_booking_and_evidenced_return() -> None:
+    booking_id = UUID("00000000-0000-0000-0000-000000000010")
+    completed_return = _completed_return(booking_id)
+    incomplete_return = HandoverRecord(
+        direction=HandoverDirection.return_,
+        status=HandoverStatus.renter_signed,
+        condition_checklist={},
+    )
+    completed_pickup = HandoverRecord(
+        direction=HandoverDirection.pickup,
+        status=HandoverStatus.completed,
+        condition_checklist={},
+    )
+    unsigned_return = HandoverRecord(
+        direction=HandoverDirection.return_,
+        status=HandoverStatus.completed,
+        condition_checklist={},
+        evidence_urls=[],
+    )
+    payment = Payment(
+        booking_id=booking_id,
+        type=PaymentType.payout,
+        amount=Decimal("1000.00"),
+        vendor_recipient_code="RCP_vendor",
+        platform_fee=Decimal("100.00"),
+    )
+
+    assert payment.is_payout_eligible(
+        [completed_return], booking_status=BookingStatus.completed, payout_on_hold=False
+    )
+    assert not payment.is_payout_eligible(
+        [completed_return], booking_status=BookingStatus.disputed, payout_on_hold=False
+    )
+    assert not payment.is_payout_eligible(
+        [completed_return], booking_status=BookingStatus.completed, payout_on_hold=True
+    )
+    assert not payment.is_payout_eligible(
+        [incomplete_return], booking_status=BookingStatus.completed, payout_on_hold=False
+    )
+    assert not payment.is_payout_eligible(
+        [completed_pickup], booking_status=BookingStatus.completed, payout_on_hold=False
+    )
+    assert not payment.is_payout_eligible(
+        [unsigned_return], booking_status=BookingStatus.completed, payout_on_hold=False
+    )
+    assert not payment.is_payout_eligible(
+        [], booking_status=BookingStatus.completed, payout_on_hold=False
+    )
+    unrelated_return = _completed_return(UUID("00000000-0000-0000-0000-000000000099"))
+    assert not payment.is_payout_eligible(
+        [unrelated_return], booking_status=BookingStatus.completed, payout_on_hold=False
+    )
+
+
+def test_mark_payout_eligible_records_timestamp_after_completed_return() -> None:
+    booking_id = UUID("00000000-0000-0000-0000-000000000010")
+    eligible_at = datetime(2026, 9, 26, 12, tzinfo=UTC)
+    payment = Payment(
+        booking_id=booking_id,
+        type=PaymentType.payout,
+        amount=Decimal("1000.00"),
+        vendor_recipient_code="RCP_vendor",
+        platform_fee=Decimal("100.00"),
+    )
+    completed_return = _completed_return(booking_id)
+
+    payment.mark_payout_eligible(
+        [completed_return],
+        booking_status=BookingStatus.completed,
+        payout_on_hold=False,
+        eligible_at=eligible_at,
+    )
+
+    assert payment.payout_status is PayoutStatus.eligible
+    assert payment.payout_eligible_at == eligible_at
