@@ -5,13 +5,33 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, request_context_middleware
 from app.db.session import create_database_engine, create_database_sessionmaker
+from app.schemas.errors import ErrorDetail, ErrorEnvelope, VouchAPIError
+
+
+def _error_response(request: Request, exc: VouchAPIError) -> JSONResponse:
+    """Build a standard error envelope from a domain exception."""
+    request_id = getattr(request.state, "request_id", "unknown")
+    body = ErrorEnvelope(
+        error=ErrorDetail(
+            code=exc.code,
+            message=exc.detail_message,
+            details=exc.error_details,
+            request_id=request_id,
+        )
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=body.model_dump(),
+        headers={"X-Request-ID": request_id},
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -49,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
         expose_headers=["X-Request-ID"],
     )
+    application.add_exception_handler(VouchAPIError, _error_response)  # type: ignore[arg-type]
     application.include_router(api_router, prefix=runtime_settings.api_v1_prefix)
     return application
 

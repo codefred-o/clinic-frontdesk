@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from uuid import uuid4
 
@@ -10,6 +11,16 @@ from fastapi import Request, Response
 from starlette.middleware.base import RequestResponseEndpoint
 
 logger = logging.getLogger("vouch.http")
+
+# Valid request-ID: 1–128 printable ASCII characters (no control chars).
+_REQUEST_ID_RE = re.compile(r"^[\x21-\x7E]{1,128}$")
+
+
+def _safe_request_id(header_value: str | None) -> str:
+    """Return the caller's request ID if valid, otherwise generate a UUID."""
+    if header_value and _REQUEST_ID_RE.match(header_value):
+        return header_value
+    return str(uuid4())
 
 
 def configure_logging(debug: bool = False) -> None:
@@ -26,9 +37,15 @@ async def request_context_middleware(
     request: Request,
     call_next: RequestResponseEndpoint,
 ) -> Response:
-    """Attach a generated request ID and emit one completion log per request."""
+    """Attach a correlation request ID and emit one completion log per request.
 
-    request_id = str(uuid4())
+    The ``X-Request-ID`` header is honoured when valid (1–128 printable ASCII).
+    Invalid or absent values are replaced with a generated UUID.  The resolved
+    ID is written to ``request.state.request_id`` and echoed in the response
+    header so both sides share the same trace token.
+    """
+
+    request_id = _safe_request_id(request.headers.get("X-Request-ID"))
     request.state.request_id = request_id
     started_at = time.perf_counter()
 

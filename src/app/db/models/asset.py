@@ -7,7 +7,19 @@ import uuid
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import Boolean, CheckConstraint, Date, Enum, ForeignKey, Index, Numeric, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -27,6 +39,30 @@ class AssetCategory(StrEnum):
 class City(StrEnum):
     lagos = "lagos"
     abuja = "abuja"
+
+
+class ListingStatus(StrEnum):
+    """Publication state for a creative-gear listing.
+
+    Visibility rules
+    ----------------
+    Only ``active`` listings owned by an active, non-deleted vendor and with
+    ``is_available=True`` and ``city=lagos`` appear in public search results.
+
+    Transition path (manual concierge only in Phase 0)
+    ---------------------------------------------------
+    draft  →  review  →  active
+                      →  rejected
+           →  (vendor edits, stays draft)
+    active →  paused
+    paused →  active (re-review may be required)
+    """
+
+    draft = "draft"
+    review = "review"
+    active = "active"
+    paused = "paused"
+    rejected = "rejected"
 
 
 class Asset(TimestampMixin, SoftDeleteMixin, Base):
@@ -56,15 +92,63 @@ class Asset(TimestampMixin, SoftDeleteMixin, Base):
     )
     condition_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # --- Listing publication fields (added in migration 0002) ---
+    listing_status: Mapped[ListingStatus] = mapped_column(
+        Enum(ListingStatus, name="listingstatus"),
+        nullable=False,
+        default=ListingStatus.draft,
+        server_default=ListingStatus.draft.value,
+    )
+    # Minimum renter trust tier required to transact on this asset (0, 1, or 2).
+    # Stored as a plain integer to match the KYC tier policy.
+    minimum_trust_tier: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    # Provenance of the most recent review decision (admin user ID, nullable).
+    review_actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    reviewed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     __table_args__ = (
         CheckConstraint("daily_rate > 0", name="ck_assets_daily_rate_positive"),
         CheckConstraint("deposit_amount >= 0", name="ck_assets_deposit_amount_nonnegative"),
+        CheckConstraint(
+            "minimum_trust_tier BETWEEN 0 AND 2",
+            name="ck_assets_minimum_trust_tier_valid",
+        ),
+        # Partial index for public Lagos inventory search (active, non-deleted, available).
+        Index(
+            "ix_assets_public_lagos",
+            "city",
+            "category",
+            "daily_rate",
+            "created_at",
+            "id",
+            postgresql_where=text(
+                "listing_status = 'active' AND is_available = true AND deleted_at IS NULL"
+            ),
+        ),
         Index("ix_assets_vendor_id", "vendor_id"),
     )
 
     vendor: Mapped[object] = relationship(
         "User",
+        foreign_keys=[vendor_id],
         back_populates="assets",
+        lazy="raise",
+    )
+    review_actor: Mapped[object] = relationship(
+        "User",
+        foreign_keys=[review_actor_id],
         lazy="raise",
     )
     bookings: Mapped[list[object]] = relationship(
@@ -81,7 +165,8 @@ class Asset(TimestampMixin, SoftDeleteMixin, Base):
     def __repr__(self) -> str:
         return (
             f"<Asset id={self.id} name={self.name!r} "
-            f"vendor_id={self.vendor_id} category={self.category.value}>"
+            f"vendor_id={self.vendor_id} category={self.category.value} "
+            f"listing_status={self.listing_status.value}>"
         )
 
 

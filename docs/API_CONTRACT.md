@@ -2,7 +2,7 @@
 
 ## 1. Status and compatibility
 
-The API base is `/api/v1`. Only the health endpoints are currently implemented. Every marketplace, identity, payment, handover, admin, and webhook endpoint below is **planned** and must not be represented as available until implemented and published in OpenAPI.
+The API base is `/api/v1`. The health and public inventory endpoints are currently implemented. Every identity, booking, payment, handover, admin, and webhook endpoint below is **planned** and must not be represented as available until implemented and published in OpenAPI.
 
 Current endpoints:
 
@@ -10,6 +10,8 @@ Current endpoints:
 |---|---|---|---|
 | `GET` | `/api/v1/health/live` | None | Process liveness; `200` with service/version |
 | `GET` | `/api/v1/health/ready` | None | Dependency readiness; `200` when DB ready, `503` otherwise |
+| `GET` | `/api/v1/assets` | None | Search active Lagos inventory; supports category, date-range, daily-rate, limit, and cursor filters |
+| `GET` | `/api/v1/assets/{asset_id}` | None | Public detail of a single active Lagos listing; `404` for non-public or unknown assets |
 
 The FastAPI application currently exposes Swagger/ReDoc/OpenAPI outside production only.
 

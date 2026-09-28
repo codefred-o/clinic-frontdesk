@@ -110,6 +110,7 @@ class User(TimestampMixin, SoftDeleteMixin, Base):
     )
     assets: Mapped[list] = relationship(
         "Asset",
+        foreign_keys="Asset.vendor_id",
         back_populates="vendor",
         lazy="raise",
     )

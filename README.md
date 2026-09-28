@@ -14,9 +14,15 @@ and future WhatsApp or Telegram clients can evolve behind stable interfaces.
 - Validated, environment-prefixed configuration
 - Async PostgreSQL engine lifecycle with connection health checks
 - Separate liveness and readiness endpoints
-- Request correlation IDs and structured completion logs
+- Request correlation IDs and structured completion logs (honours caller-supplied `X-Request-ID`)
 - Explicit CORS policy for the future web client
 - Automated lint, test, and coverage checks in CI
+- Seven domain tables and initial Alembic migration (migration 0001)
+- Asset listing-publication state (`draft / review / active / paused / rejected`), minimum trust
+  tier, and review provenance fields (migration 0002)
+- Shared API error envelope with stable machine-readable codes
+- Opaque cursor-based pagination helpers
+- Public Lagos asset search and detail endpoints (read-only, no authentication required)
 
 ## Architecture
 
@@ -53,6 +59,9 @@ environments.
 
 - `GET /api/v1/health/live` verifies that the API process is running.
 - `GET /api/v1/health/ready` verifies that required dependencies are available.
+- `GET /api/v1/assets` searches active Lagos creative-gear inventory (supports
+  category, date-range, daily-rate, and limit/cursor filters).
+- `GET /api/v1/assets/{asset_id}` returns the public detail of a single active Lagos listing.
 - API documentation is available at `/docs` outside production.
 
 ## Quality checks

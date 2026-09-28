@@ -16,10 +16,19 @@ Implemented now:
 - liveness and database-aware readiness endpoints;
 - async SQLAlchemy/PostgreSQL engine and sessions;
 - environment-prefixed validated settings;
-- request correlation IDs and structured completion logging;
+- request correlation IDs and structured completion logging (honours caller-supplied `X-Request-ID`);
 - explicit CORS configuration;
-- seven domain tables and initial Alembic migration; and
-- model/application/migration tests.
+- seven domain tables and initial Alembic migration (0001);
+- model/application/migration tests;
+- asset listing-publication state (`draft / review / active / paused / rejected`), minimum trust
+  tier, review provenance fields, and migration 0002;
+- shared API error envelope (`400 invalid_request`, `404 resource_not_found`) with trace IDs;
+- opaque cursor-based pagination helpers; and
+- public Lagos asset search (`GET /api/v1/assets`) and detail (`GET /api/v1/assets/{id}`)
+  endpoints with strict visibility predicates — only active, non-deleted Lagos assets owned by
+  active vendors are returned; serial numbers and internal fields are never exposed.
+  **Note**: inventory ingestion and review (vendor draft submission, admin approve/reject/pause)
+  are not yet implemented; public inventory requires manual database operations in Phase 0.
 
 Not implemented now:
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Numeric
+from sqlalchemy import CheckConstraint, Enum, Numeric
 
 import app.db.models  # noqa: F401
 from app.db.base import Base
+from app.db.models.asset import ListingStatus
 
 
 def _table(name: str):
@@ -52,3 +53,53 @@ def test_asset_monetary_amounts_are_constrained() -> None:
 
 def test_availability_window_has_valid_date_range() -> None:
     assert "starts_at <= ends_at" in _check_sql("availability_windows")
+
+
+# --- Listing publication fields ---
+
+
+def test_assets_listing_status_column_exists() -> None:
+    col = _table("assets").c["listing_status"]
+    assert isinstance(col.type, Enum)
+
+
+def test_assets_listing_status_enum_values() -> None:
+    col = _table("assets").c["listing_status"]
+    assert set(col.type.enums) == {"draft", "review", "active", "paused", "rejected"}
+
+
+def test_assets_listing_status_default_is_draft() -> None:
+    col = _table("assets").c["listing_status"]
+    # Server default is set to 'draft' — new rows are never accidentally active.
+    assert col.server_default is not None
+    assert "draft" in str(col.server_default.arg)
+
+
+def test_assets_minimum_trust_tier_column_exists() -> None:
+    _table("assets").c["minimum_trust_tier"]
+
+
+def test_assets_minimum_trust_tier_constrained() -> None:
+    assert "minimum_trust_tier BETWEEN 0 AND 2" in _check_sql("assets")
+
+
+def test_assets_review_actor_id_column_exists() -> None:
+    _table("assets").c["review_actor_id"]
+
+
+def test_assets_reviewed_at_column_exists() -> None:
+    _table("assets").c["reviewed_at"]
+
+
+def test_assets_review_reason_column_exists() -> None:
+    _table("assets").c["review_reason"]
+
+
+def test_listing_status_enum_has_expected_members() -> None:
+    assert set(ListingStatus) == {
+        ListingStatus.draft,
+        ListingStatus.review,
+        ListingStatus.active,
+        ListingStatus.paused,
+        ListingStatus.rejected,
+    }
